@@ -1,0 +1,21 @@
+# This image extends the rootless Flink base image with the SQL Gateway module
+# and organization-approved connector JARs staged in the build context.
+
+ARG BASE_IMAGE=image-registry.openshift-image-registry.svc:5000/{{OPENSHIFT_NAMESPACE}}/flink-base:2.3.0
+FROM ${BASE_IMAGE}
+
+USER 0
+
+RUN set -eux; \
+    cp /opt/flink/opt/flink-sql-gateway*.jar /opt/flink/lib/
+
+COPY third_party/flink-sql-connector-kafka.jar /opt/flink/lib/flink-sql-connector-kafka.jar
+COPY third_party/flink-json.jar /opt/flink/lib/flink-json.jar
+
+RUN chgrp -R 0 /opt/flink /var/lib/flink \
+ && chmod -R g=u /opt/flink /var/lib/flink
+
+USER 185
+
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["exec /opt/flink/bin/sql-gateway.sh start-foreground -Dsql-gateway.endpoint.type=rest -Dsql-gateway.endpoint.rest.address=0.0.0.0 -Dsql-gateway.endpoint.rest.bind-address=0.0.0.0 -Dsql-gateway.endpoint.rest.bind-port=8083 -Dsql-gateway.endpoint.rest.port=8083"]

@@ -1,0 +1,93 @@
+# Flink 2.3 uses config.yaml rather than flink-conf.yaml.
+
+kubernetes.cluster-id: "{{FLINK_CLUSTER_ID}}"
+kubernetes.namespace: "{{OPENSHIFT_NAMESPACE}}"
+kubernetes.service-account: flink-runner
+
+high-availability.type: kubernetes
+high-availability.cluster-id: "{{FLINK_CLUSTER_ID}}"
+high-availability.storageDir: "{{HA_STORAGE_URI}}"
+high-availability.jobmanager.port: "6123"
+high-availability.kubernetes.leader-election.lease-duration: 20 s
+high-availability.kubernetes.leader-election.renew-deadline: 15 s
+high-availability.kubernetes.leader-election.retry-period: 5 s
+
+jobmanager.bind-host: 0.0.0.0
+jobmanager.rpc.address: flink-jobmanager
+jobmanager.rpc.port: 6123
+jobmanager.memory.process.size: 3072m
+jobmanager.execution.failover-strategy: region
+
+rest.address: flink-jobmanager
+rest.bind-address: 0.0.0.0
+rest.bind-port: "8081"
+rest.port: 8081
+rest.await-leader-timeout: 30 s
+
+blob.server.port: "6124"
+blob.storage.directory: /var/lib/flink/blob
+
+taskmanager.bind-host: 0.0.0.0
+taskmanager.memory.process.size: 12288m
+taskmanager.numberOfTaskSlots: 2
+taskmanager.registration.timeout: 5 min
+taskmanager.network.memory.buffer-debloat.enabled: true
+taskmanager.network.memory.buffer-debloat.target: 1 s
+
+parallelism.default: 4
+pipeline.max-parallelism: 128
+execution.runtime-mode: STREAMING
+
+execution.checkpointing.mode: EXACTLY_ONCE
+execution.checkpointing.storage: filesystem
+execution.checkpointing.dir: "{{CHECKPOINT_URI}}"
+execution.checkpointing.savepoint-dir: "{{SAVEPOINT_URI}}"
+execution.checkpointing.interval: 60 s
+execution.checkpointing.timeout: 10 min
+execution.checkpointing.min-pause: 30 s
+execution.checkpointing.max-concurrent-checkpoints: 1
+execution.checkpointing.num-retained: 10
+execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+execution.checkpointing.unaligned.enabled: true
+execution.checkpointing.incremental: true
+execution.checkpointing.local-backup.enabled: true
+execution.checkpointing.local-backup.dirs: /var/lib/flink/local-recovery
+execution.state-recovery.from-local: true
+
+state.backend.type: rocksdb
+state.backend.rocksdb.localdir: /var/lib/flink/rocksdb
+state.backend.rocksdb.memory.managed: true
+state.backend.rocksdb.predefined-options: FLASH_SSD_OPTIMIZED
+
+restart-strategy.type: exponential-delay
+restart-strategy.exponential-delay.initial-backoff: 5 s
+restart-strategy.exponential-delay.max-backoff: 2 min
+restart-strategy.exponential-delay.backoff-multiplier: 2.0
+restart-strategy.exponential-delay.reset-backoff-threshold: 30 min
+restart-strategy.exponential-delay.jitter-factor: 0.1
+
+process.working-dir: /var/lib/flink/process
+process.taskmanager.working-dir: /var/lib/flink/process/taskmanager
+process.jobmanager.working-dir: /var/lib/flink/process/jobmanager
+io.tmp.dirs: /var/lib/flink/tmp
+
+pekko.ask.timeout: 60 s
+heartbeat.timeout: 60 s
+heartbeat.interval: 10 s
+
+table.exec.source.idle-timeout: 60 s
+table.local-time-zone: UTC
+
+web.submit.enable: false
+web.cancel.enable: false
+web.exception-history-size: 32
+
+env.log.level: INFO
+env.stdout-err.redirect-to-file: false
+
+metrics.system-resource: true
+metrics.fetcher.update-interval: 15 s
+
+cluster.processes.halt-on-fatal-error: true
+classloader.check-leaked-classloader: true
+sink.committer.retries: 20

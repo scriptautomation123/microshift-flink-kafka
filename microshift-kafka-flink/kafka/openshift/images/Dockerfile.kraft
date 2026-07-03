@@ -1,0 +1,43 @@
+FROM registry.access.redhat.com/ubi9/ubi AS builder
+
+ARG KAFKA_VERSION=3.7.1
+ARG SCALA_VERSION=2.13
+ARG KAFKA_ARCHIVE_URL=https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz
+
+RUN dnf install -y \
+    ca-certificates \
+    curl-minimal \
+    tar \
+    gzip \
+    shadow-utils \
+    java-17-openjdk-headless \
+ && dnf clean all
+
+WORKDIR /tmp
+RUN curl -fsSL "${KAFKA_ARCHIVE_URL}" -o kafka.tgz \
+ && tar -xzf kafka.tgz \
+ && mv kafka_${SCALA_VERSION}-${KAFKA_VERSION} /opt/kafka
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal
+
+RUN microdnf install -y \
+    bash \
+    hostname \
+    shadow-utils \
+    java-17-openjdk-headless \
+ && microdnf clean all
+
+ENV KAFKA_HOME=/opt/kafka \
+    PATH=/opt/kafka/bin:${PATH}
+
+COPY --from=builder /opt/kafka /opt/kafka
+COPY bin/start-kafka-kraft.sh /usr/local/bin/start-kafka-kraft.sh
+
+RUN chmod 0755 /usr/local/bin/start-kafka-kraft.sh \
+ && mkdir -p /var/lib/kafka/data /opt/kafka/config/generated \
+ && chgrp -R 0 /opt/kafka /var/lib/kafka \
+ && chmod -R g=u /opt/kafka /var/lib/kafka
+
+USER 185
+
+ENTRYPOINT ["/usr/local/bin/start-kafka-kraft.sh"]

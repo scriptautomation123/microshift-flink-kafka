@@ -1,0 +1,14 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: flink-sql-gateway
+spec:
+  host: flink-sql-gateway-{{OPENSHIFT_NAMESPACE}}.apps.example.com
+  to:
+    kind: Service
+    name: flink-sql-gateway
+  port:
+    targetPort: rest
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

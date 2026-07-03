@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+export PATH="$HOME/.local/bin:$PATH"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  cleanup-all [--purge-local-data] [--skip-namespaces] [--skip-cluster-delete]
+
+Options:
+  --purge-local-data   Remove local hostPath data directories used by local PV helper.
+                      Requires sudo and deletes:
+                        /var/lib/microshift-local-pv
+                        /var/lib/microshift/local-pv
+  --skip-namespaces    Skip namespace deletion for kafka/flink namespaces.
+  --skip-cluster-delete Skip minc cluster deletion.
+  -h, --help           Show help.
+
+Notes:
+  - This is a destructive cleanup helper for local environments.
+  - Namespace deletion uses oc if authenticated.
+  - Cluster deletion uses minc delete.
+EOF
+}
+
+log() {
+  printf '[%s] %s\n' "$(date +'%Y-%m-%dT%H:%M:%S%z')" "$*"
+}
+
+warn() {
+  printf 'WARN: %s\n' "$*" >&2
+}
+
+PURGE_LOCAL_DATA=false
+SKIP_NAMESPACES=false
+SKIP_CLUSTER_DELETE=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --purge-local-data)
+      PURGE_LOCAL_DATA=true
+      shift
+      ;;
+    --skip-namespaces)
+      SKIP_NAMESPACES=true
+      shift
+      ;;
+    --skip-cluster-delete)
+      SKIP_CLUSTER_DELETE=true
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "${SKIP_NAMESPACES}" != true ]]; then
+  if command -v oc >/dev/null 2>&1 && oc whoami >/dev/null 2>&1; then
+    log "Deleting Kafka and Flink namespaces"
+    oc delete ns kafka-dev flink-dev flink-stage flink-prod --ignore-not-found || true
+  else
+    warn "oc not available or not authenticated; skipping namespace deletion"
+  fi
+fi
+
+if [[ "${SKIP_CLUSTER_DELETE}" != true ]]; then
+  if command -v minc >/dev/null 2>&1; then
+    log "Deleting MicroShift cluster"
+    minc delete || true
+  else
+    warn "minc not found; skipping cluster deletion"
+  fi
+fi
+
+if [[ "${PURGE_LOCAL_DATA}" == true ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    log "Purging local PV host data directories"
+    sudo rm -rf /var/lib/microshift-local-pv /var/lib/microshift/local-pv
+  else
+    warn "sudo not found; could not purge local data directories"
+  fi
+fi
+
+log "Cleanup completed"

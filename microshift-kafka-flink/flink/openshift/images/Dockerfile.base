@@ -1,0 +1,57 @@
+FROM registry.access.redhat.com/ubi9/ubi AS builder
+
+ARG FLINK_VERSION=2.3.0
+ARG SCALA_VERSION=2.12
+ARG FLINK_ARCHIVE_URL=https://archive.apache.org/dist/flink/flink-${FLINK_VERSION}/flink-${FLINK_VERSION}-bin-scala_${SCALA_VERSION}.tgz
+
+RUN dnf install -y \
+    ca-certificates \
+    curl-minimal \
+    findutils \
+    gzip \
+    java-17-openjdk-headless \
+    shadow-utils \
+    tar \
+ && dnf clean all
+
+WORKDIR /tmp
+
+RUN curl -fsSL "${FLINK_ARCHIVE_URL}" -o flink.tgz \
+ && tar -xzf flink.tgz \
+ && mv flink-${FLINK_VERSION} /opt/flink \
+ && mkdir -p /opt/flink/plugins/s3-fs-hadoop \
+ && cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/s3-fs-hadoop/ \
+ && rm -rf /opt/flink/examples /opt/flink/usrlib/* /tmp/flink.tgz
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal
+
+RUN microdnf install -y \
+    bash \
+    ca-certificates \
+    findutils \
+    hostname \
+    java-17-openjdk-headless \
+    procps-ng \
+    shadow-utils \
+ && microdnf clean all
+
+ENV FLINK_HOME=/opt/flink \
+    FLINK_CONF_DIR=/opt/flink/conf \
+    PATH=/opt/flink/bin:${PATH}
+
+COPY --from=builder /opt/flink /opt/flink
+
+RUN mkdir -p \
+      /opt/flink/log \
+      /var/lib/flink/blob \
+      /var/lib/flink/local-recovery \
+      /var/lib/flink/process \
+      /var/lib/flink/rocksdb \
+      /var/lib/flink/tmp \
+ && chgrp -R 0 /opt/flink /var/lib/flink \
+ && chmod -R g=u /opt/flink /var/lib/flink
+
+USER 185
+
+ENTRYPOINT ["/bin/bash", "-lc"]
+CMD ["exec /opt/flink/bin/jobmanager.sh start-foreground"]

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+
+ENV_FILE=${1:-}
+
+load_env "${ENV_FILE}"
+require_env \
+  OPENSHIFT_NAMESPACE \
+  FLINK_CLUSTER_ID \
+  HA_STORAGE_URI \
+  CHECKPOINT_URI \
+  SAVEPOINT_URI \
+  KAFKA_BOOTSTRAP_SERVERS \
+  KAFKA_SOURCE_TOPIC \
+  KAFKA_SINK_TOPIC \
+  KAFKA_CONSUMER_GROUP \
+  KAFKA_SECURITY_PROTOCOL \
+  KAFKA_SASL_MECHANISM \
+  KAFKA_SASL_JAAS_CONFIG \
+  KAFKA_TRUSTSTORE_PASSWORD \
+  KAFKA_TRANSACTIONAL_ID_PREFIX \
+  PIPELINE_NAME
+
+render_bundle
+
+log "rendered templates into ${RENDER_DIR}"
