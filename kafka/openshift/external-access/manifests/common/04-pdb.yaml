@@ -1,7 +1,7 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: kafka
+  name: kafka-external
 spec:
   minAvailable: 2
   selector:

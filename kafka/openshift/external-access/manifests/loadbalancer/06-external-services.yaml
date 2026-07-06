@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external-0
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: external-access
+spec:
+  type: LoadBalancer
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-0
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 19092
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external-1
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: external-access
+spec:
+  type: LoadBalancer
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-1
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 19092
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-external-2
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: external-access
+spec:
+  type: LoadBalancer
+  selector:
+    statefulset.kubernetes.io/pod-name: kafka-2
+  ports:
+    - name: broker
+      port: 9092
+      targetPort: 19092

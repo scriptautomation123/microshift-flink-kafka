@@ -27,6 +27,7 @@ This is inspired by the high-availability principles from Learnkube's Kafka HA p
 - `env/example.env`: deployment-time variables
 - `scripts/build-image.sh`: build and push Kafka KRaft image
 - `scripts/deploy.sh`: apply manifests in order
+- `scripts/create-topic.sh`: create Kafka topics through a short-lived Kubernetes Job
 - `scripts/check.sh`: readiness and topic-level checks
 - `scripts/delete.sh`: remove Kafka resources
 
@@ -98,11 +99,16 @@ For a non-destructive pre/post maintenance validation helper (health + topic des
 
 - [scripts/maintenance-guard.sh](scripts/maintenance-guard.sh)
 
+For CI/CD-safe topic creation without `oc exec`, use:
+
+- [scripts/create-topic.sh](scripts/create-topic.sh)
+
 Example:
 
 ```bash
-docs/kafka/openshift/scripts/maintenance-guard.sh docs/kafka/openshift/env/dev.env --topic ha-drill --phase pre
-docs/kafka/openshift/scripts/maintenance-guard.sh docs/kafka/openshift/env/dev.env --topic ha-drill --phase post
+kafka/openshift/scripts/maintenance-guard.sh kafka/openshift/env/dev.env --topic ha-drill --phase pre
+kafka/openshift/scripts/maintenance-guard.sh kafka/openshift/env/dev.env --topic ha-drill --phase post
+kafka/openshift/scripts/create-topic.sh kafka/openshift/env/dev.env --topic ha-drill --partitions 3 --replication-factor 3 --min-insync 2
 ```
 
 Scale brokers (example):
@@ -117,12 +123,13 @@ Check StatefulSet and PVC health:
 oc get sts,pods,pvc -n <namespace>
 ```
 
-Validate topic replication and ISR from a broker pod:
+Create a topic with an OpenShift Job and then validate replication and ISR with local Kafka CLI tools over port-forward:
 
 ```bash
-oc exec -n <namespace> kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
-  --bootstrap-server kafka.<namespace>.svc:9092 \
-  --describe
+kafka/openshift/scripts/create-topic.sh kafka/openshift/env/dev.env --topic ha-drill --partitions 3 --replication-factor 3 --min-insync 2
+
+oc port-forward -n <namespace> svc/kafka 9092:9092 &
+kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic ha-drill
 ```
 
 ## Cleanup

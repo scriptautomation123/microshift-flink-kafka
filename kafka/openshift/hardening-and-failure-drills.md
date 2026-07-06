@@ -57,26 +57,22 @@ These are configured in [03-statefulset.yaml](manifests/03-statefulset.yaml) and
 
 ## 2. Create A Drill Topic
 
-Set namespace and create a topic with explicit HA settings.
+Create the drill topic with the CI/CD-safe Job helper and then describe it over a port-forward.
 
 ```bash
-export NS=kafka-dev
-oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
-  --create \
+kafka/openshift/scripts/create-topic.sh kafka/openshift/env/dev.env \
   --topic ha-drill \
   --partitions 3 \
   --replication-factor 3 \
-  --config min.insync.replicas=2 \
-  --bootstrap-server kafka.${NS}.svc:9092
+  --min-insync 2
 ```
 
 Describe the topic baseline:
 
 ```bash
-oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
-  --describe \
-  --topic ha-drill \
-  --bootstrap-server kafka.${NS}.svc:9092
+export NS=kafka-dev
+oc port-forward -n "$NS" svc/kafka 9092:9092 &
+kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic ha-drill
 ```
 
 Expected shape:

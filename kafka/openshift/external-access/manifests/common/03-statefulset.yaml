@@ -1,0 +1,184 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka-external
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  serviceName: kafka-headless
+  replicas: {{KAFKA_REPLICAS}}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+    spec:
+      serviceAccountName: kafka-runner
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kafka
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kafka
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: kafka
+          image: {{KAFKA_IMAGE}}
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              KAFKA_HOME=${KAFKA_HOME:-/opt/kafka}
+              HOSTNAME_VALUE=$(hostname)
+              POD_ORDINAL=${HOSTNAME_VALUE##*-}
+              KAFKA_NAMESPACE=${KAFKA_NAMESPACE:-${POD_NAMESPACE:-default}}
+              HEADLESS_SERVICE=${KAFKA_HEADLESS_SERVICE:-kafka-headless}
+              DATA_DIR=${KAFKA_DATA_DIR:-/var/lib/kafka/data}
+              CONFIG_FILE=${KAFKA_HOME}/config/generated/server.properties
+              EXTERNAL_PORT=${KAFKA_EXTERNAL_SERVICE_PORT:-19092}
+              EXTERNAL_INTERNAL_PORT=${KAFKA_EXTERNAL_LISTENER_INTERNAL_PORT:-19093}
+              EXTERNAL_HOSTS=(${KAFKA_EXTERNAL_BROKER_HOSTS//,/ })
+              EXTERNAL_PORTS=(${KAFKA_EXTERNAL_BROKER_PORTS//,/ })
+              EXTERNAL_HOST=${EXTERNAL_HOSTS[$POD_ORDINAL]:-}
+              EXTERNAL_ADVERTISED_PORT=${EXTERNAL_PORTS[$POD_ORDINAL]:-${EXTERNAL_PORT}}
+
+              if [[ -z "${EXTERNAL_HOST}" ]]; then
+                echo "missing external host for broker ordinal ${POD_ORDINAL}" >&2
+                exit 1
+              fi
+
+              cat >"${CONFIG_FILE}" <<EOF
+              process.roles=broker,controller
+              node.id=${POD_ORDINAL}
+              controller.quorum.voters=0@kafka-0.${HEADLESS_SERVICE}.${KAFKA_NAMESPACE}.svc:9093,1@kafka-1.${HEADLESS_SERVICE}.${KAFKA_NAMESPACE}.svc:9093,2@kafka-2.${HEADLESS_SERVICE}.${KAFKA_NAMESPACE}.svc:9093
+
+              listeners=INTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:${EXTERNAL_INTERNAL_PORT}
+              advertised.listeners=INTERNAL://kafka-${POD_ORDINAL}.${HEADLESS_SERVICE}.${KAFKA_NAMESPACE}.svc:9092,EXTERNAL://${EXTERNAL_HOST}:${EXTERNAL_ADVERTISED_PORT}
+              listener.security.protocol.map=INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+              inter.broker.listener.name=INTERNAL
+              controller.listener.names=CONTROLLER
+
+              log.dirs=${DATA_DIR}
+              num.partitions={{KAFKA_NUM_PARTITIONS}}
+              default.replication.factor={{KAFKA_DEFAULT_REPLICATION_FACTOR}}
+              min.insync.replicas={{KAFKA_MIN_INSYNC_REPLICAS}}
+              offsets.topic.replication.factor={{KAFKA_DEFAULT_REPLICATION_FACTOR}}
+              transaction.state.log.replication.factor={{KAFKA_DEFAULT_REPLICATION_FACTOR}}
+              transaction.state.log.min.isr={{KAFKA_MIN_INSYNC_REPLICAS}}
+              auto.create.topics.enable=false
+              unclean.leader.election.enable=false
+
+              log.retention.hours=168
+              log.segment.bytes=1073741824
+              EOF
+
+              if [[ ! -f "${DATA_DIR}/meta.properties" ]]; then
+                "${KAFKA_HOME}/bin/kafka-storage.sh" format \
+                  -t "${KAFKA_CLUSTER_ID}" \
+                  -c "${CONFIG_FILE}" \
+                  --ignore-formatted
+              fi
+
+              exec "${KAFKA_HOME}/bin/kafka-server-start.sh" "${CONFIG_FILE}"
+          ports:
+            - name: broker
+              containerPort: 9092
+            - name: controller
+              containerPort: 9093
+          env:
+            - name: KAFKA_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KAFKA_CLUSTER_ID
+              value: "{{KAFKA_CLUSTER_ID}}"
+            - name: KAFKA_REPLICAS
+              value: "{{KAFKA_REPLICAS}}"
+            - name: KAFKA_HEADLESS_SERVICE
+              value: kafka-headless
+            - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+              value: "{{KAFKA_DEFAULT_REPLICATION_FACTOR}}"
+            - name: KAFKA_MIN_INSYNC_REPLICAS
+              value: "{{KAFKA_MIN_INSYNC_REPLICAS}}"
+            - name: KAFKA_NUM_PARTITIONS
+              value: "{{KAFKA_NUM_PARTITIONS}}"
+            - name: KAFKA_DATA_DIR
+              value: /var/lib/kafka/data
+            - name: KAFKA_EXTERNAL_SERVICE_PORT
+              value: "{{KAFKA_EXTERNAL_SERVICE_PORT}}"
+            - name: KAFKA_EXTERNAL_LISTENER_INTERNAL_PORT
+              value: "{{KAFKA_EXTERNAL_LISTENER_INTERNAL_PORT}}"
+            - name: KAFKA_EXTERNAL_BROKER_HOSTS
+              value: "{{KAFKA_EXTERNAL_BROKER_HOSTS}}"
+            - name: KAFKA_EXTERNAL_BROKER_PORTS
+              value: "{{KAFKA_EXTERNAL_BROKER_PORTS}}"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+        - name: envoy
+          image: {{ENVOY_IMAGE}}
+          imagePullPolicy: IfNotPresent
+          args:
+            - -c
+            - /etc/envoy/envoy.yaml
+          ports:
+            - name: envoy
+              containerPort: 19092
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: envoy-bootstrap
+              mountPath: /etc/envoy
+      volumes:
+        - name: envoy-bootstrap
+          configMap:
+            name: kafka-envoy-bootstrap
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{KAFKA_STORAGE_SIZE}}
