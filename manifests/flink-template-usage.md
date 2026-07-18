@@ -155,17 +155,20 @@ oc rollout restart statefulset/flink-taskmanager -n flink-dev
 ## Troubleshooting
 
 ### Check template syntax
+
 ```bash
 oc process -f flink/openshift/manifests/template-flink-sql-gateway.yaml --param-file env/dev.env -o yaml > /tmp/output.yaml
 cat /tmp/output.yaml | oc apply --dry-run=client -f -
 ```
 
 ### View all parameters
+
 ```bash
 oc process -f flink/openshift/manifests/template-flink-sql-gateway.yaml --parameters
 ```
 
 ### List all created resources
+
 ```bash
 oc get all,cm,secret,pvc -l app.kubernetes.io/name=flink -n flink-dev
 ```

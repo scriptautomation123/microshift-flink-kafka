@@ -1,0 +1,5 @@
+ARG BASE_RUNTIME_IMAGE=ghcr.io/owner/flink-sql-runtime:2.3.0
+FROM ${BASE_RUNTIME_IMAGE}
+
+ARG APP_JAR=target/my-app.jar
+COPY ${APP_JAR} /opt/flink/usrlib/application.jar

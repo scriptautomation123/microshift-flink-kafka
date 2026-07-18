@@ -3,6 +3,7 @@
 ## Overview
 
 `template-kafka-cluster.yaml` is an OpenShift template that deploys a complete Apache Kafka cluster in KRaft mode (no ZooKeeper) with:
+
 - **ServiceAccount** (kafka-runner)
 - **Headless Service** (inter-pod communication)
 - **Client Service** (external access)
@@ -220,6 +221,7 @@ oc get pods -n kafka-dev -w
 ## Troubleshooting
 
 ### Check template syntax
+
 ```bash
 oc process -f kafka/openshift/manifests/template-kafka-cluster.yaml \
   --param-file env/dev.env -o yaml > /tmp/output.yaml
@@ -227,15 +229,18 @@ cat /tmp/output.yaml | oc apply --dry-run=client -f -
 ```
 
 ### View all parameters
+
 ```bash
 oc process -f kafka/openshift/manifests/template-kafka-cluster.yaml --parameters
 ```
 
 ### List all created resources
+
 ```bashscripts/env scripts/flink-docker scripts/flink-sql scripts/kafka-docker scripts/manifests scripts/lib.sh scripts/microshift.sh
 ```
 
 ### Check broker logs
+
 ```bash
 oc logs kafka-0 -n kafka-dev
 oc logs kafka-1 -n kafka-dev
@@ -243,6 +248,7 @@ oc logs kafka-2 -n kafka-dev
 ```
 
 ### Check KRaft quorum status
+
 ```bash
 oc exec kafka-0 -n kafka-dev -- \
   kafka-metadata.sh --snapshot /var/lib/kafka/data/__cluster_metadata-0/00000000000000000000.log --print

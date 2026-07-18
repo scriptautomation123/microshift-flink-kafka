@@ -27,25 +27,30 @@
 
 ### Fast Navigation by Topic
 
-#### Getting Started
+#### Getting Started Links
+
 - **[Quick Start (5 minutes)](#getting-started)** — Two fastest paths to working platform
 - **[Prerequisites](#prerequisites)** — Host requirements
 
 #### Platform Setup
+
 - **[MicroShift Installation](#platform-installation-microshift)** — Packages, clients, cluster bootstrap
 - **[MicroShift Configuration](#platform-configuration)** — DNS, Docker coexistence, storage
 - **[Namespaces & RBAC](#namespaces--service-identities)** — Service account setup
 
 #### Deployment
+
 - **[Kafka Deployment](#kafka-deployment--operations)** — Build, deploy, verify
 - **[Flink Deployment](#flink-deployment--operations)** — Build, deploy, verify
 
 #### Operations
+
 - **[Day-2 Operations](#day-2-operations)** — Health checks, maintenance, updates
 - **[HA Drills](#kafka-ha-hardening--failure-drills)** — Failure scenarios and recovery
 - **[Troubleshooting](#troubleshooting)** — Common issues and solutions
 
 #### Reference
+
 - **[One-Click Deployment](#one-click-deployment)** — Fully automated
 - **[Quick Commands](#quick-reference-common-commands)** — Common oc/kubectl commands
 - **[Scripts](#reference--scripts)** — Script locations and purposes
@@ -53,12 +58,14 @@
 ### Navigation by Role
 
 #### For First-Time Users
+
 1. [Prerequisites](#prerequisites)
 2. [Quick Start → Path 1 (Automated)](#path-1-fully-automated-recommended-for-first-time-users)
-3. [Verify: Deployment Verification](#deployment-verification)
+3. [Verify: Deployment Verification](#deployment-verification-kafka)
 4. [Next: Day-2 Operations](#day-2-operations)
 
 #### For DevOps / Platform Engineers
+
 1. [Architecture](#architecture--design)
 2. [Installation](#platform-installation-microshift) + [Configuration](#platform-configuration)
 3. [RBAC Design](#namespaces--service-identities)
@@ -66,12 +73,14 @@
 5. [HA Drills](#kafka-ha-hardening--failure-drills)
 
 #### For Data Engineers
+
 1. [Flink Architecture](#flink-jobmanager-vs-taskmanager)
 2. [Flink Deployment](#flink-deployment--operations)
 3. [Kafka Integration](#kafka-deployment--operations)
 4. [Troubleshooting](#troubleshooting)
 
 #### For SRE / Operators
+
 1. [Full Setup Path](#path-2-step-by-step-for-more-control)
 2. [Day-2 Operations](#day-2-operations)
 3. [HA Drills](#kafka-ha-hardening--failure-drills)
@@ -87,6 +96,7 @@
 #### Path 1: Fully Automated (Recommended for First-Time Users)
 
 Set credentials:
+
 ```bash
 export GH_OWNER="your-org"
 export GH_USER="your-github-username"
@@ -94,6 +104,7 @@ export GH_PAT="your-github-personal-access-token"
 ```
 
 Run:
+
 ```bash
 runbooks/scripts/test-all --clean --auto-ghcr --kafka-topic ha-drill
 ```
@@ -103,6 +114,7 @@ This deploys everything end-to-end in 10-15 minutes.
 #### Path 2: Step-by-Step (For More Control)
 
 Follow sections in order:
+
 1. [Platform Installation](#platform-installation-microshift) — 30 min
 2. [Platform Configuration](#platform-configuration) — 15 min
 3. [Namespaces & RBAC](#namespaces--service-identities) — 5 min
@@ -125,11 +137,13 @@ Follow sections in order:
 ### Platform Overview
 
 **MicroShift**: Lightweight Kubernetes on Podman/Docker via MINC wrapper
+
 - Single-node cluster
 - Includes OLM (Operator Lifecycle Manager)
 - ~1 GB footprint
 
 **Kafka**: 3-broker KRaft cluster (no ZooKeeper)
+
 - StatefulSet-based
 - Namespace-scoped RBAC
 - Local PersistentVolumes for data
@@ -138,6 +152,7 @@ Follow sections in order:
 - No Kafka operator required
 
 **Flink**: SQL Gateway + JobManager + TaskManagers
+
 - SQL-first approach for declarative workloads
 - Namespace-scoped RBAC with 4 service identities (runner, deployer, submitter, observer)
 - Integration with Kafka via connectors
@@ -145,7 +160,7 @@ Follow sections in order:
 - Built from UBI9 images
 - No Flink operator required
 
-### Design Principles
+### Namespace Design Principles
 
 1. **No operators**: All resources are StatefulSets, Services, ConfigMaps, Secrets—no CRDs required
 2. **Namespace isolation**: Each component has its own namespace with RBAC boundaries
@@ -157,7 +172,8 @@ Follow sections in order:
 
 #### Flink: JobManager vs TaskManager
 
-**JobManager (Master)**
+##### JobManager (Master)
+
 - Receives jobs (SQL, JAR, DataStream)
 - Builds execution graph
 - Manages checkpoints and savepoints
@@ -165,7 +181,8 @@ Follow sections in order:
 - Low memory requirements
 - Deployment: 1 JobManager pod in `flink-dev`
 
-**TaskManager (Worker)**
+##### TaskManager (Worker)
+
 - Executes user-defined functions (map, filter, window, etc.)
 - Manages state (RocksDB)
 - Communicates with other TaskManagers
@@ -175,16 +192,19 @@ Follow sections in order:
 #### Kafka: KRaft (Quorum Controller)
 
 **Architecture**:
+
 - 3 brokers, each pod runs both broker + controller
 - Controllers form quorum for distributed consensus
 - No ZooKeeper: all coordination within Kafka cluster
 
 **Storage**:
+
 - Controller metadata: `/var/local/kafka-logs/__cluster_metadata-0/`
 - Broker data: `/var/local/kafka-logs/`
 - Both on local PersistentVolumes
 
 **Network**:
+
 - Headless Service for stable DNS: `kafka-0.kafka-headless.kafka-dev.svc`, etc.
 - Client Service: `kafka-client.kafka-dev.svc:9092`
 
@@ -208,6 +228,8 @@ MicroShift Cluster
 
 ## Platform Installation (MicroShift)
 
+Detailed Podman, MINC, cluster cleanup, PVC handling, and reinstallation instructions are in [podman_minc_README.md](podman_minc_README.md). The steps below are the condensed path.
+
 ### Installation Goals
 
 1. Prepare host packages
@@ -215,6 +237,8 @@ MicroShift Cluster
 3. Install and validate `oc`, `kubectl`
 4. Install and validate MINC
 5. Bootstrap cluster
+
+For full Podman/Docker coexistence, DNS, cluster access, cleanup, and PVC handling details, see [podman_minc_README.md](podman_minc_README.md).
 
 ### Step 1: Host Prerequisites
 
@@ -231,10 +255,25 @@ sudo apt-get install -y \
   podman
 ```
 
-### Step 2: Validate Podman
+See [podman_minc_README.md](podman_minc_README.md) for Podman validation, DNS, and Docker coexistence.
+
+### Step 2: Install VS Code (Optional, from code.visualstudio.com)
+
+Preferred on Ubuntu (deb package):
 
 ```bash
-podman info --format '{{.Host.NetworkBackend}} {{.Host.Security.Rootless}}'
+curl -L "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64" -o /tmp/vscode-stable.deb
+sudo apt-get install -y /tmp/vscode-stable.deb
+code --version
+```
+
+If you install the Linux tarball from code.visualstudio.com instead of the deb package,
+add VS Code to your shell PATH in `~/.bashrc`:
+
+```bash
+echo 'export PATH="$HOME/.local/opt/vscode/VSCode-linux-x64/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+code --version
 ```
 
 ### Step 3: Install OpenShift Client (`oc`, `kubectl`)
@@ -261,42 +300,44 @@ install -m 0755 kubectl "$HOME/.local/bin/kubectl"
 ```
 
 Validate:
+
 ```bash
 bash -lc 'command -v oc && oc version --client'
 ```
 
-### Step 4: Install MINC
+### Step 4: Install MINC and Create the Cluster
 
 ```bash
+# Install MINC
 curl -fsSL -o /tmp/minc https://github.com/minc-org/minc/releases/download/v0.1.0/minc-linux-amd64
 sudo install -m 0755 /tmp/minc /usr/local/bin/minc
 minc version
-```
 
-For arm64, use matching release asset.
-
-### Step 5: Set MINC Defaults
-
-```bash
+# Configure and create
 minc config set provider podman
 minc config set allow-rootless true
 minc config view
-```
 
-### Step 6: Create Cluster
-
-```bash
 minc delete || true
 minc create
+
+# Generate kubeconfig for first-time access
+minc generate-kubeconfig
+oc config use-context microshift
 ```
 
+For full MINC install options, Docker coexistence, Podman DNS, cluster access, and reinstallation details, see [podman_minc_README.md](podman_minc_README.md).
+
 Validate:
+
 ```bash
 minc status
 minc list
 ```
 
-### Step 7: Initial Cluster Health Checks
+### Cluster Health Check Snippet
+
+Use this canonical snippet whenever you need baseline cluster health verification.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -307,7 +348,12 @@ oc get pods -n openshift-operator-lifecycle-manager -o wide
 ss -ltnp | grep -E ':(6443|9080|9443)\b' || true
 ```
 
+### Step 5: Initial Cluster Health Checks
+
+Run the [Cluster Health Check Snippet](#cluster-health-check-snippet) and verify gates below.
+
 Expected baseline:
+
 - ✓ `oc whoami` succeeds
 - ✓ Node is `Ready`
 - ✓ OLM pods (`catalog-operator`, `olm-operator`) running
@@ -317,68 +363,21 @@ Expected baseline:
 
 ## Platform Configuration
 
-### Step 1: Configure Podman DNS
+For Podman DNS, Docker coexistence, full cleanup/reinstall, and PVC handling details, see [podman_minc_README.md](podman_minc_README.md).
 
-If Docker is running, Podman needs explicit DNS configuration.
+### Step 1: Cluster Validation
 
-**Automated path**:
-```bash
-sudo microshift.sh configure-dns --dns1 1.1.1.1 --dns2 8.8.8.8
-```
-
-**Manual path**:
-```bash
-sudo install -d -m 0755 /etc/containers
-sudo tee /etc/containers/containers.conf >/dev/null <<'EOF'
-[containers]
-dns_servers = ["1.1.1.1", "8.8.8.8"]
-EOF
-```
-
-Validate:
-```bash
-sudo podman run --rm docker.io/library/alpine:3.20 cat /etc/resolv.conf
-```
-
-### Step 2: Validate Podman Egress
+Preferred one-command validation:
 
 ```bash
-sudo podman run --rm docker.io/library/busybox:1.36 sh -c 'nslookup quay.io 1.1.1.1; echo ---; wget -T 10 -O- http://1.1.1.1 2>&1 | sed -n "1,20p"'
+runbooks/scripts/validate-platform-all.sh
 ```
 
-### Step 3: Docker + Podman Coexistence (If Docker Running)
-
-**Automated path**:
-```bash
-sudo microshift.sh install-forwarding
-```
-
-**Manual path**:
-```bash
-sudo iptables -I DOCKER-USER 1 -i podman0 -j ACCEPT
-sudo iptables -I DOCKER-USER 2 -o podman0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-```
-
-### Step 4: Recreate Cluster After Runtime Changes
-
-```bash
-minc delete || true
-minc create
-```
-
-### Step 5: Cluster Validation
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-oc whoami && oc whoami --show-server
-oc get nodes -o wide
-oc get pods -n openshift-operator-lifecycle-manager
-ss -ltnp | grep -E ':(6443|9080|9443)\b' || true
-```
+For low-level troubleshooting, run the [Cluster Health Check Snippet](#cluster-health-check-snippet).
 
 **Hard gate**: Cluster must be Ready, OLM pods running, listeners active.
 
-### Step 6: Local PV Provisioning (For Single-Node MINC)
+### Step 2: Local PV Provisioning (For Single-Node MINC)
 
 If no default dynamic `StorageClass` exists, provision static local PVs:
 
@@ -387,6 +386,7 @@ microshift.sh provision-pv --kafka-namespace kafka-dev --flink-namespace flink-d
 ```
 
 Verify:
+
 ```bash
 oc get pv
 oc get pvc -n kafka-dev
@@ -396,12 +396,15 @@ oc get pvc -n flink-dev
 ### Troubleshooting Configuration
 
 **Issue**: Kafka/Flink pods stay `Pending` with `pod has unbound immediate PersistentVolumeClaims`
+
 - **Solution**: Run `microshift.sh provision-pv` for target namespaces
 
 **Issue**: Docker works but Podman has no egress
+
 - **Solution**: Verify nftables/iptables forwarding rules, re-apply forwarding service
 
 **Issue**: MINC create succeeds but OLM in `ImagePullBackOff`
+
 - **Solution**: Verify Podman DNS resolver and egress; on Docker coexistence hosts, verify `DOCKER-USER` permits `podman0` forwarding
 
 ---
@@ -421,6 +424,7 @@ This section applies to both Kafka and Flink. Each component uses different iden
 ### Recommended Namespace Model
 
 **Environment layout** (for both Kafka and Flink):
+
 ```
 kafka-dev     / flink-dev
 kafka-stage   / flink-stage
@@ -428,6 +432,7 @@ kafka-prod    / flink-prod
 ```
 
 Or shared-platform layout:
+
 ```
 kafka-platform-dev     / flink-platform-dev
 kafka-platform-stage   / flink-platform-stage
@@ -441,11 +446,13 @@ Do not mix unrelated production/non-production workloads in one namespace if you
 **Minimal pattern**: One runtime identity for broker pods
 
 **`kafka-runner`** — Runtime identity for Kafka broker pods
+
 - Purpose: Pod communication, status checks, metadata management
 - Scope: Runtime only (minimal RBAC for broker-to-broker discovery)
 - No separate deployer/submitter identities needed unless running Kafka operations automation
 
 **Quick Setup**:
+
 ```bash
 oc create serviceaccount kafka-runner -n kafka-prod
 
@@ -473,6 +480,7 @@ This separation is necessary because Flink requires distinct capabilities across
 **Quick Setup** (for flink-prod):
 
 Create service accounts:
+
 ```bash
 oc create serviceaccount flink-runner -n flink-prod
 oc create serviceaccount flink-deployer -n flink-prod
@@ -481,6 +489,7 @@ oc create serviceaccount flink-observer -n flink-prod
 ```
 
 Create roles:
+
 ```bash
 # Runtime role
 oc create role flink-runner \
@@ -523,6 +532,7 @@ oc create role flink-sql-submitter \
 ```
 
 Bind roles:
+
 ```bash
 oc adm policy add-role-to-user flink-runner -z flink-runner -n flink-prod
 oc adm policy add-role-to-user flink-runner-discovery -z flink-runner -n flink-prod
@@ -535,17 +545,20 @@ oc adm policy add-role-to-user flink-observer -z flink-observer -n flink-prod
 
 ### Ready-To-Apply Manifests
 
-**Kafka**: 
+**Kafka**:
+
 ```bash
 oc apply -f manifests/00-serviceaccount.yaml
 ```
 
 **Flink** (all environments):
+
 ```bash
 oc apply -f manifests/10-namespace-identities-governance-all-environments-example.yaml
 ```
 
 Or individual environments:
+
 ```bash
 oc apply -f manifests/08-namespace-identities-governance-dev-example.yaml
 oc apply -f manifests/09-namespace-identities-governance-stage-example.yaml
@@ -577,15 +590,17 @@ oc auth can-i create deployments.apps --as=system:serviceaccount:flink-prod:flin
 
 ## Kafka Deployment & Operations
 
-### What You Get
+### What You Get (Flink)
 
 **Consolidated Package Structure** (all at root level):
 
 **Docker Images**:
+
 - `kafka-docker/Dockerfile.kraft` — Rootless-compatible Kafka image built from Apache Kafka OSS binaries
 - `kafka-docker/bin/start-kafka-kraft.sh` — Startup script deriving broker identity from StatefulSet ordinal
 
 **Kubernetes Resources**:
+
 - `manifests/00-serviceaccount.yaml` — Service account and RBAC
 - `manifests/01-headless-service.yaml` — Stable network identities for brokers
 - `manifests/02-client-service.yaml` — In-cluster bootstrap service
@@ -593,10 +608,12 @@ oc auth can-i create deployments.apps --as=system:serviceaccount:flink-prod:flin
 - `manifests/04-pdb.yaml` — PodDisruptionBudget (minAvailable: 2)
 
 **Configuration**:
+
 - `env/kafka.dev.env` — Deployment variables (previously env/example.env)
 - `env/kafka.example.env` — Template with all variables documented
 
 **Operations** (provided by lib.sh functions):
+
 - `kafka_deploy()` — Deploy Kafka cluster
 - `kafka_health_check()` — Readiness and health checks
 - `kafka_delete_resources()` — Remove resources
@@ -612,7 +629,7 @@ oc auth can-i create deployments.apps --as=system:serviceaccount:flink-prod:flin
 6. Image baseline: UBI9-based container images (freely redistributable)
 7. Service identity: `kafka-runner` ServiceAccount with minimal RBAC
 
-### Quick Start
+### Quick Start (Kafka)
 
 ```bash
 # 1. Create config from template  
@@ -639,9 +656,10 @@ kafka_deploy "kafka-dev" "env/kafka.dev.env"
 kafka_health_check "kafka-dev"
 ```
 
-### Configuration (env/dev.env)
+### Configuration (Kafka env/dev.env)
 
 Required fields:
+
 - `OPENSHIFT_NAMESPACE` — Namespace for Kafka (default: kafka-dev)
 - `KAFKA_IMAGE` — Docker image reference
 - `KAFKA_CLUSTER_ID` — Unique cluster identifier
@@ -649,10 +667,12 @@ Required fields:
 - `KAFKA_STORAGE_SIZE` — PVC size per broker (default: 50Gi)
 
 Registry options:
+
 - **GitHub Container Registry** (recommended for local/dev): `ghcr.io/<owner-or-org>/kafka-kraft:3.7.1`
 - Private registry: Set `REGISTRY_LOGIN_USERNAME` and `REGISTRY_LOGIN_PASSWORD`
 
 Generate cluster ID:
+
 ```bash
 KAFKA_CLUSTER_ID=$(echo -n "$(od -An -tx1 -N16 /dev/urandom | tr -d ' ')" | cut -c1-22)
 echo "Generated KAFKA_CLUSTER_ID: ${KAFKA_CLUSTER_ID}"
@@ -660,10 +680,12 @@ echo "Generated KAFKA_CLUSTER_ID: ${KAFKA_CLUSTER_ID}"
 ```
 
 Storage note for local MINC clusters:
+
 - If no default dynamic `StorageClass` exists, pre-provision static local PVs before deploy:
+
   `microshift.sh provision-pv --kafka-only --kafka-namespace <namespace>`
 
-### Deployment Verification
+### Deployment Verification (Kafka)
 
 ```bash
 # Brokers healthy
@@ -682,6 +704,7 @@ oc exec -n kafka-dev kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 ```
 
 **Hard gates**:
+
 - ✓ All 3 broker pods Running and Ready
 - ✓ Headless service endpoints healthy
 - ✓ Cluster bootstrap and listeners operational
@@ -696,11 +719,13 @@ oc exec -n kafka-dev kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 **Consolidated Package Structure** (all at root level):
 
 **Configuration**:
+
 - `env/flink.config.yaml` — Production-oriented Flink runtime config (Flink 2.3 uses config.yaml, not flink-conf.yaml)
 - `env/flink.dev.env` — Deployment variables (previously env/example.env)
 - `env/flink.example.env` — Template with all variables documented
 
 **Kubernetes Resources**:
+
 - `manifests/00-serviceaccount-rbac.yaml` — Service identities and RBAC
 - `manifests/01-configmap.yaml` — Runtime configuration
 - `manifests/02-secrets-example.yaml` — Example secrets
@@ -711,21 +736,32 @@ oc exec -n kafka-dev kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 - `manifests/07-10-namespace-identities-*.yaml` — Ready-to-apply RBAC and governance
 
 **SQL Definitions**:
+
 - `flink-sql/10-session-config.sql` — Session execution settings
 - `flink-sql/20-kafka-source.sql` — Kafka source table
 - `flink-sql/30-kafka-sink.sql` — Kafka sink table (exactly-once)
 - `flink-sql/40-pipeline.sql` — Sample insert statement
 
 **Docker Images**:
+
 - `flink-docker/Dockerfile.base` — Rootless Flink base image
 - `flink-docker/Dockerfile.sql-runtime` — SQL runtime image
+- `flink-docker/Dockerfile.application` — Application image with baked-in job JAR for application mode
 - `flink-docker/third_party/` — Connector JARs and dependencies
 
 **Operations** (provided by lib.sh functions):
+
 - `flink_deploy()` — Deploy Flink cluster
 - `flink_build_images()` — Build Flink images
 - `flink_submit_sql()` — Submit SQL to Gateway
 - `flink_test_all()` — Full Flink functionality test
+
+### Application Mode Runbook
+
+For image-first Flink application mode (where the app JAR is baked into its own
+image and started with `standalone-job.sh start-foreground`), use:
+
+- `docs/flink-submit-application-oc/README.md`
 
 ### Design Intent
 
@@ -743,9 +779,10 @@ Use this layout when you want a durable, SQL-first Flink platform with:
 - CI/CD submitting SQL through SQL Gateway REST API
 
 Image baseline:
+
 - UBI9-based build/runtime images (freely redistributable and aligned to OpenShift security)
 
-### Quick Start
+### Quick Start (Flink)
 
 ```bash
 # 1. Create config from template
@@ -768,9 +805,10 @@ flink_deploy "flink-dev" "env/flink.dev.env" --wait
 validate_flink_identities "flink-dev"
 ```
 
-### Configuration (env/dev.env)
+### Configuration (Flink env/dev.env)
 
 Required fields:
+
 - `OPENSHIFT_NAMESPACE` — Namespace for Flink (default: flink-dev)
 - `BASE_IMAGE_REF` — Flink base image reference
 - `SQL_RUNTIME_IMAGE_REF` — Flink SQL runtime image reference
@@ -778,10 +816,11 @@ Required fields:
 - `KAFKA_BROKER_PORT` — Kafka port (default: 9092)
 
 Optional fields:
+
 - `OBJECTSTORE_S3_*` — S3-compatible object store for checkpoints
 - `REGISTRY_LOGIN_*` — Private registry credentials
 
-### Deployment Verification
+### Deployment Verification (Flink)
 
 ```bash
 # Component health
@@ -803,6 +842,7 @@ oc get rolebinding -n flink-dev
 ```
 
 **Hard gates**:
+
 - ✓ JobManager pod Running and Ready
 - ✓ At least 1 TaskManager pod Running and Ready
 - ✓ SQL Gateway pod Running and Ready
@@ -825,12 +865,14 @@ kafka_health_check "kafka-dev"
 #### Pre/Post-Maintenance Guard
 
 Before maintenance:
+
 ```bash
 source lib.sh
 kafka_maintenance_guard "kafka-dev" "env/kafka.dev.env" --topic ha-drill --phase pre
 ```
 
 After maintenance:
+
 ```bash
 source lib.sh
 kafka_maintenance_guard "kafka-dev" "env/kafka.dev.env" --topic ha-drill --phase post
@@ -894,12 +936,10 @@ scripts/validate-namespace-identities.sh --json flink-dev flink-stage flink-prod
 #### Cluster Health
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
-oc get nodes -o wide
-oc get pods -A
-oc get pods -n kafka-dev
-oc get pods -n flink-dev
+runbooks/scripts/validate-platform-all.sh
 ```
+
+For node-level debugging, run the [Cluster Health Check Snippet](#cluster-health-check-snippet).
 
 #### Kafka
 
@@ -941,6 +981,7 @@ kafka_health_check "kafka-dev"
 ```
 
 Requirements:
+
 - Kafka deployed and healthy
 - At least 3 schedulable worker nodes
 - Can run `oc adm drain/cordon`
@@ -966,6 +1007,7 @@ kafka_create_topic "kafka-dev" "ha-drill" \
 ```
 
 Describe baseline:
+
 ```bash
 export NS=kafka-dev
 oc port-forward -n "$NS" svc/kafka 9092:9092 &
@@ -997,6 +1039,7 @@ oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 ```
 
 Map leader ID to pod:
+
 ```bash
 oc get pod -n "$NS" -o wide -l app.kubernetes.io/name=kafka
 ```
@@ -1006,6 +1049,7 @@ If leader is broker 1, target pod is `kafka-1`.
 ### 5. Drill A: Single Broker Disruption
 
 Cordon and drain node hosting leader:
+
 ```bash
 export NODE=<node-hosting-leader>
 oc adm cordon "$NODE"
@@ -1013,11 +1057,13 @@ oc adm drain "$NODE" --ignore-daemonsets --delete-emptydir-data --force
 ```
 
 Watch pods:
+
 ```bash
 oc get pod -n "$NS" -o wide -l app.kubernetes.io/name=kafka -w
 ```
 
 Re-check leader/ISR:
+
 ```bash
 oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
   --describe --topic ha-drill \
@@ -1025,11 +1071,13 @@ oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 ```
 
 Expected:
+
 - Leader migrates to another ISR member
 - Cluster continues serving with 2 brokers
 - ISR drops to 2 temporarily
 
 Validate produce/consume during disruption:
+
 ```bash
 oc exec -n "$NS" kafka-2 -- bash -lc '
 echo "during-drain" | /opt/kafka/bin/kafka-console-producer.sh \
@@ -1038,11 +1086,13 @@ echo "during-drain" | /opt/kafka/bin/kafka-console-producer.sh \
 ```
 
 Uncordon:
+
 ```bash
 oc adm uncordon "$NODE"
 ```
 
 Post-maintenance assertion:
+
 ```bash
 scripts/maintenance-guard.sh env/dev.env --topic ha-drill --phase post
 ```
@@ -1050,16 +1100,19 @@ scripts/maintenance-guard.sh env/dev.env --topic ha-drill --phase post
 ### 6. Drill B: PDB Blocks Unsafe Second Drain
 
 With one broker unavailable, attempt draining second node:
+
 ```bash
 export NODE2=<another-kafka-node>
 oc adm drain "$NODE2" --ignore-daemonsets --delete-emptydir-data --force
 ```
 
 Expected:
+
 - Drain fails to evict Kafka pod due to PDB
 - Prevents dropping below quorum-safe posture
 
 Inspect PDB:
+
 ```bash
 oc get pdb -n "$NS"
 oc describe pdb kafka -n "$NS"
@@ -1071,17 +1124,20 @@ If node doesn't return:
 
 1. Remove failed node from inventory (platform step)
 2. Identify stuck broker pod (`Pending`):
+
 ```bash
 oc get pod -n "$NS" -o wide -l app.kubernetes.io/name=kafka
 oc get pvc -n "$NS" -l app.kubernetes.io/name=kafka
 ```
 
-3. Delete problematic PVC (StatefulSet will create new pod):
+1. Delete problematic PVC (StatefulSet will create new pod):
+
 ```bash
 oc delete pvc kafka-logs-kafka-<N> -n "$NS"
 ```
 
-4. Monitor new broker startup and ISR convergence:
+1. Monitor new broker startup and ISR convergence:
+
 ```bash
 oc get pod -n "$NS" -o wide -l app.kubernetes.io/name=kafka -w
 oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
@@ -1090,6 +1146,7 @@ oc exec -n "$NS" kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
 ```
 
 Expected:
+
 - New broker pod starts
 - ISR grows back to 3
 - Replication catches up
@@ -1098,69 +1155,30 @@ Expected:
 
 ## Troubleshooting
 
-### DNS Issues
+### DNS, Networking, MINC, and Storage Issues
 
-**Symptom**: Podman has no egress, but Docker works
+Detailed Podman DNS, Docker/Podman coexistence, MINC cleanup, PVC handling, and full reinstallation steps are in [podman_minc_README.md](podman_minc_README.md).
 
-**Diagnostics**:
-```bash
-ls -l /etc/resolv.conf
-sed -n '1,80p' /etc/resolv.conf
-sed -n '1,80p' /run/systemd/resolve/resolv.conf
-sudo podman run --rm docker.io/library/alpine:3.20 cat /etc/resolv.conf
-sudo podman run --rm docker.io/library/busybox:1.36 nslookup quay.io 1.1.1.1
-```
+Quick pointers:
 
-**Solution**: Apply `microshift.sh configure-dns`, then recreate cluster
-
-### Networking Issues
-
-**Symptom**: MINC create succeeds but OLM in `ImagePullBackOff`
-
-**Solution**: Verify Podman DNS and egress; on Docker coexistence hosts, verify `DOCKER-USER` permits `podman0` forwarding
-
-### Storage Issues
-
-**Symptom**: Kafka/Flink pods stay `Pending` with `pod has unbound immediate PersistentVolumeClaims`
-
-**Solution**:
-```bash
-microshift.sh provision-pv --kafka-namespace kafka-dev --flink-namespace flink-dev
-oc get pvc -n kafka-dev
-oc get pvc -n flink-dev
-```
-
-### MINC Issues
-
-**Symptom**: `minc create --allow-rootless` fails
-
-**Solution**:
-```bash
-minc config set allow-rootless true
-minc create
-```
-
-**Symptom**: Cluster has stale references after host reboot
-
-**Solution**:
-```bash
-minc delete || true
-sudo podman rm -f microshift 2>/dev/null || true
-sudo podman network rm podman 2>/dev/null || true
-sudo podman network create podman
-minc create
-```
+- **DNS / egress**: Use `microshift.sh configure-dns`, then recreate the cluster.
+- **OLM `ImagePullBackOff`**: Verify Podman DNS and Docker/Podman forwarding rules.
+- **Unbound PVCs**: Run `microshift.sh provision-pv --kafka-namespace kafka-dev --flink-namespace flink-dev`.
+- **Rootless MINC create fails**: `minc config set allow-rootless true && minc create`.
+- **Stale cluster after reboot**: Follow the full reinstall procedure in [podman_minc_README.md](podman_minc_README.md).
 
 ### Kafka Issues
 
 **Symptom**: Brokers stuck in `CrashLoopBackOff`
 
 **Diagnostics**:
+
 ```bash
 oc logs -n kafka-dev kafka-0 --tail=50
 ```
 
 **Common causes**:
+
 - PVC not bound (provision local PVs)
 - Permissions issue on PV (check pod SCC)
 - Configuration error in env/dev.env
@@ -1170,12 +1188,14 @@ oc logs -n kafka-dev kafka-0 --tail=50
 **Symptom**: JobManager or TaskManager stuck `Pending`
 
 **Diagnostics**:
+
 ```bash
 oc describe pod -n flink-dev <pod-name>
 oc logs -n flink-dev <pod-name> --tail=50
 ```
 
 **Common causes**:
+
 - PVC not bound (provision local PVs)
 - Insufficient TaskManager resources (reduce replicas/memory)
 - SQL Gateway deployment failing (check manifests applied)
@@ -1199,6 +1219,7 @@ oc delete -f manifests/ -n flink-dev --selector=app.kubernetes.io/name=flink
 ```
 
 Or delete entire namespace:
+
 ```bash
 oc delete namespace flink-dev
 ```
@@ -1219,6 +1240,10 @@ oc delete ns kafka-dev flink-dev
 ```
 
 ### Full Cluster Teardown
+
+For detailed cleanup, PVC handling, and full reinstallation instructions, see [podman_minc_README.md](podman_minc_README.md).
+
+Quick teardown:
 
 ```bash
 minc delete
@@ -1249,6 +1274,7 @@ runbooks/scripts/test-all --clean --auto-ghcr --kafka-topic ha-drill
 ```
 
 This runs:
+
 1. Platform setup (MicroShift installation & configuration)
 2. Namespace bootstrap with RBAC
 3. Kafka build & deploy with validation
@@ -1259,6 +1285,7 @@ This runs:
 **Estimated time**: 10-15 minutes (depends on image pulls and host resources)
 
 For non-destructive platform validation:
+
 ```bash
 runbooks/scripts/validate-platform-all.sh
 ```
@@ -1274,10 +1301,8 @@ runbooks/scripts/validate-platform-all.sh
 export PATH="$HOME/.local/bin:$PATH"
 
 # Cluster status
-oc whoami && oc whoami --show-server
-oc get nodes -o wide
-oc get pods -n kafka-dev
-oc get pods -n flink-dev
+# Reuse the canonical cluster check from:
+# "Cluster Health Check Snippet"
 
 # Kafka health
 oc port-forward -n kafka-dev svc/kafka 9092:9092 &
@@ -1310,13 +1335,13 @@ runbooks/scripts/test-all --clean --auto-ghcr --kafka-topic ha-drill
 
 **Consolidated Scripts** (Root Level):
 
-All component operations are now provided by functions in `lib.sh` rather than separate scripts:
+All component operations are provided by `lib.sh` plus targeted orchestrator scripts.
 
-- **lib.sh** — Central library with 60+ functions for all operations
-  - **Kafka ops**: `kafka_deploy()`, `kafka_delete_resources()`, `kafka_health_check()`, `kafka_create_topic()`, `kafka_maintenance_guard()`, `kafka_test_all()`
-  - **Flink ops**: `flink_deploy()`, `flink_build_images()`, `flink_create_secrets()`, `flink_submit_sql()`, `flink_smoke_test()`, `flink_test_all()`, `validate_flink_identities()`, `regenerate_namespace_identities_umbrella()`
-  - **Platform ops**: `run_full_platform_test()`, `cleanup_all()`, `validate_all()`
-  - **Utilities**: `load_env()`, `require_env()`, `render_template()`, `render_tree()`, `create_namespace()`, `apply_manifests()`, `wait_for_deployment()`, `wait_for_statefulset()`
+- **lib.sh** — Primary function library for Kafka, Flink, and platform lifecycle operations.
+  - Kafka examples: `kafka_deploy()`, `kafka_health_check()`, `kafka_maintenance_guard()`
+  - Flink examples: `flink_deploy()`, `flink_submit_sql()`, `validate_flink_identities()`
+  - Platform examples: `run_full_platform_test()`, `cleanup_all()`, `validate_all()`
+  - Discover functions quickly: `grep -nE '^[a-zA-Z_][a-zA-Z0-9_]*\(\)' lib.sh`
 
 - **microshift.sh** — MicroShift cluster management (consolidated from 4 original scripts)
   - `microshift.sh configure-dns` — Configure Podman DNS
@@ -1336,10 +1361,12 @@ These orchestrate the lib.sh functions for complete workflows:
 ### Configuration Files
 
 **Kafka** (`env/`):
+
 - `kafka.dev.env` — Development environment
 - `kafka.example.env` — Template with all variables documented
 
 **Flink** (`env/`):
+
 - `flink.dev.env` — Development environment
 - `flink.example.env` — Template with all variables documented
 - `flink.config.yaml` — Flink SQL runtime configuration
@@ -1347,9 +1374,11 @@ These orchestrate the lib.sh functions for complete workflows:
 ### Manifest Locations
 
 **Kafka** (`manifests/`):
+
 - StatefulSet, Service, PDB, RBAC, ConfigMap
 
 **Flink** (`manifests/`):
+
 - JobManager, TaskManager, SQL Gateway, RBAC, governance
 
 ---
@@ -1359,6 +1388,7 @@ These orchestrate the lib.sh functions for complete workflows:
 This is the **single authoritative source** for all platform procedures, design patterns, and operations.
 
 **Key Principles**:
+
 1. ✓ All procedures documented once in this guide
 2. ✓ No duplicate content across multiple files
 3. ✓ Internal links via markdown anchors instead of file separation
@@ -1366,6 +1396,7 @@ This is the **single authoritative source** for all platform procedures, design 
 5. ✓ Comprehensive reference sections at the end
 
 **When Updating Documentation**:
+
 1. Edit only this file (PLATFORM-COMPLETE-GUIDE.md)
 2. Update TABLE OF CONTENTS if adding new sections
 3. Use markdown anchors for internal links: `[text](#anchor)`
@@ -1376,3 +1407,10 @@ This is the **single authoritative source** for all platform procedures, design 
 **Last Updated**: 2026-07-06  
 **Status**: Master document - single source of truth  
 **Maintenance**: Update this document only; all navigation and component READMEs reference sections here
+
+
+oc process --local -f [template-flink-application.yaml](http://_vscodecontentref_/8) \
+  -p APPLICATION_IMAGE_REF=ghcr.io/owner/flink-application:2.3.0 \
+  -p APPLICATION_JAR_URI=file:///opt/flink/usrlib/application.jar \
+  ... \
+  | oc apply -n <namespace> -f -

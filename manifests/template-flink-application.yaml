@@ -1,0 +1,456 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: flink-application
+  description: Apache Flink Application Mode cluster with JobManager, TaskManagers, and HA on OpenShift
+  labels:
+    app.kubernetes.io/name: flink
+    app.kubernetes.io/part-of: flink-platform
+parameters:
+  - name: OPENSHIFT_NAMESPACE
+    description: OpenShift namespace for Flink deployment
+    required: true
+  - name: FLINK_CLUSTER_ID
+    description: Unique cluster identifier for Flink HA
+    required: true
+    value: flink-cluster
+  - name: SQL_RUNTIME_IMAGE_REF
+    description: Container image reference for the Flink runtime
+    required: true
+    value: ghcr.io/owner/flink-sql-runtime:2.3.0
+  - name: APPLICATION_IMAGE_REF
+    description: Container image reference that contains the application JAR
+    required: true
+    value: ghcr.io/owner/flink-application:2.3.0
+  - name: HA_STORAGE_URI
+    description: Storage URI for HA metadata (s3://, gs://, or local PV mount)
+    required: true
+  - name: CHECKPOINT_URI
+    description: Storage URI for checkpoints
+    required: true
+  - name: SAVEPOINT_URI
+    description: Storage URI for savepoints
+    required: true
+  - name: JOBMANAGER_MEMORY
+    description: JobManager memory (Gi)
+    required: true
+    value: !!str 3
+  - name: JOBMANAGER_STORAGE
+    description: JobManager storage (Gi)
+    required: true
+    value: !!str 20
+  - name: TASKMANAGER_REPLICAS
+    description: Number of TaskManager replicas
+    required: true
+    value: !!str 3
+  - name: TASKMANAGER_MEMORY
+    description: TaskManager memory per pod (Gi)
+    required: true
+    value: !!str 12
+  - name: TASKMANAGER_STORAGE
+    description: TaskManager storage per pod (Gi)
+    required: true
+    value: !!str 100
+  - name: TASKMANAGER_SLOTS
+    description: Number of task slots per TaskManager
+    required: true
+    value: !!str 2
+  - name: PARALLELISM_DEFAULT
+    description: Default parallelism
+    required: true
+    value: !!str 4
+  - name: APPLICATION_JAR_URI
+    description: Path or URI for the application JAR inside the application image
+    required: true
+    value: file:///opt/flink/usrlib/application.jar
+  - name: APPLICATION_MAIN_CLASS
+    description: Main class executed from the application JAR URI
+    required: true
+  - name: APPLICATION_ARGS
+    description: Optional arguments passed to the application
+    required: false
+objects:
+  # ============================================================================
+  # ConfigMap: Flink Configuration
+  # ============================================================================
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: flink-config
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: config
+    data:
+      config.yaml: |
+        kubernetes.cluster-id: "${FLINK_CLUSTER_ID}"
+        kubernetes.namespace: "${OPENSHIFT_NAMESPACE}"
+        kubernetes.service-account: flink-runner
+
+        high-availability.type: kubernetes
+        high-availability.cluster-id: "${FLINK_CLUSTER_ID}"
+        high-availability.storageDir: "${HA_STORAGE_URI}"
+        high-availability.jobmanager.port: 6123
+        high-availability.kubernetes.leader-election.lease-duration: 20 s
+        high-availability.kubernetes.leader-election.renew-deadline: 15 s
+        high-availability.kubernetes.leader-election.retry-period: 5 s
+
+        jobmanager.bind-host: 0.0.0.0
+        jobmanager.rpc.address: flink-jobmanager
+        jobmanager.rpc.port: 6123
+        jobmanager.memory.process.size: ${JOBMANAGER_MEMORY}072m
+        jobmanager.execution.failover-strategy: region
+
+        rest.address: flink-jobmanager
+        rest.bind-address: 0.0.0.0
+        rest.bind-port: 8081
+        rest.port: 8081
+        rest.await-leader-timeout: 30 s
+
+        blob.server.port: 6124
+        blob.storage.directory: /var/lib/flink/blob
+
+        taskmanager.bind-host: 0.0.0.0
+        taskmanager.memory.process.size: ${TASKMANAGER_MEMORY}288m
+        taskmanager.numberOfTaskSlots: ${TASKMANAGER_SLOTS}
+        taskmanager.registration.timeout: 5 min
+        taskmanager.network.memory.buffer-debloat.enabled: true
+        taskmanager.network.memory.buffer-debloat.target: 1 s
+
+        parallelism.default: ${PARALLELISM_DEFAULT}
+        pipeline.max-parallelism: 128
+        execution.runtime-mode: STREAMING
+
+        execution.checkpointing.mode: EXACTLY_ONCE
+        execution.checkpointing.storage: filesystem
+        execution.checkpointing.dir: "${CHECKPOINT_URI}"
+        execution.checkpointing.savepoint-dir: "${SAVEPOINT_URI}"
+        execution.checkpointing.interval: 60 s
+        execution.checkpointing.timeout: 10 min
+        execution.checkpointing.min-pause: 30 s
+        execution.checkpointing.max-concurrent-checkpoints: 1
+        execution.checkpointing.num-retained: 10
+        execution.checkpointing.externalized-checkpoint-retention: RETAIN_ON_CANCELLATION
+        execution.checkpointing.unaligned.enabled: true
+        execution.checkpointing.incremental: true
+        execution.checkpointing.local-backup.enabled: true
+        execution.checkpointing.local-backup.dirs: /var/lib/flink/local-recovery
+        execution.state-recovery.from-local: true
+
+        state.backend.type: rocksdb
+        state.backend.rocksdb.localdir: /var/lib/flink/rocksdb
+        state.backend.rocksdb.memory.managed: true
+        state.backend.rocksdb.predefined-options: FLASH_SSD_OPTIMIZED
+
+        restart-strategy.type: exponential-delay
+        restart-strategy.exponential-delay.initial-backoff: 5 s
+        restart-strategy.exponential-delay.max-backoff: 2 min
+        restart-strategy.exponential-delay.backoff-multiplier: 2.0
+        restart-strategy.exponential-delay.reset-backoff-threshold: 30 min
+        restart-strategy.exponential-delay.jitter-factor: 0.1
+
+        process.working-dir: /var/lib/flink/process
+        process.taskmanager.working-dir: /var/lib/flink/process/taskmanager
+        process.jobmanager.working-dir: /var/lib/flink/process/jobmanager
+        io.tmp.dirs: /var/lib/flink/tmp
+
+        pekko.ask.timeout: 60 s
+        heartbeat.timeout: 60 s
+        heartbeat.interval: 10 s
+
+        table.exec.source.idle-timeout: 60 s
+        table.local-time-zone: UTC
+
+        web.submit.enable: false
+        web.cancel.enable: false
+        web.exception-history-size: 32
+
+        env.log.level: INFO
+        env.stdout-err.redirect-to-file: false
+
+        metrics.system-resource: true
+        metrics.fetcher.update-interval: 15 s
+
+        cluster.processes.halt-on-fatal-error: true
+        classloader.check-leaked-classloader: true
+        sink.committer.retries: 20
+
+  # ============================================================================
+  # Secrets: Example Kafka + Object Store Credentials
+  # ============================================================================
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: flink-kafka-client
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: secrets
+    type: Opaque
+    stringData:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-bootstrap.example.com:9093
+      KAFKA_SOURCE_TOPIC: orders.raw
+      KAFKA_SINK_TOPIC: orders.curated
+      KAFKA_CONSUMER_GROUP: flink-orders-prod
+      KAFKA_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_SASL_MECHANISM: SCRAM-SHA-512
+      KAFKA_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required username="replace-me" password="replace-me";
+      KAFKA_TRUSTSTORE_PASSWORD: replace-me
+      KAFKA_TRANSACTIONAL_ID_PREFIX: orders-curated-prod
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: flink-kafka-files
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: secrets
+    type: Opaque
+    stringData:
+      README: |
+        Replace this placeholder secret with a real secret created from files.
+        Example:
+        oc create secret generic flink-kafka-files \
+          --from-file=kafka.truststore.jks=/secure/path/kafka.truststore.jks
+
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: flink-objectstore
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: secrets
+    type: Opaque
+    stringData:
+      CHECKPOINT_URI: ${CHECKPOINT_URI}
+      SAVEPOINT_URI: ${SAVEPOINT_URI}
+      HA_STORAGE_URI: ${HA_STORAGE_URI}
+      AWS_ACCESS_KEY_ID: replace-me
+      AWS_SECRET_ACCESS_KEY: replace-me
+      AWS_REGION: us-east-1
+
+  # ============================================================================
+  # JobManager: Service + StatefulSet
+  # ============================================================================
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: flink-jobmanager
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: jobmanager
+    spec:
+      clusterIP: None
+      publishNotReadyAddresses: true
+      selector:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: jobmanager
+      ports:
+        - name: rpc
+          port: 6123
+          targetPort: 6123
+        - name: blob
+          port: 6124
+          targetPort: 6124
+        - name: rest
+          port: 8081
+          targetPort: 8081
+
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: flink-jobmanager
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: jobmanager
+    spec:
+      serviceName: flink-jobmanager
+      replicas: 1
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: flink
+          app.kubernetes.io/component: jobmanager
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: flink
+            app.kubernetes.io/component: jobmanager
+        spec:
+          serviceAccountName: flink-runner
+          terminationGracePeriodSeconds: 30
+          containers:
+            - name: jobmanager
+              image: ${APPLICATION_IMAGE_REF}
+              imagePullPolicy: IfNotPresent
+              command:
+                - /bin/bash
+                - -lc
+              args:
+                - >-
+                  exec /opt/flink/bin/standalone-job.sh start-foreground
+                  --job-classname ${APPLICATION_MAIN_CLASS}
+                  ${APPLICATION_JAR_URI}
+                  ${APPLICATION_ARGS}
+              ports:
+                - containerPort: 6123
+                  name: rpc
+                - containerPort: 6124
+                  name: blob
+                - containerPort: 8081
+                  name: rest
+              envFrom:
+                - secretRef:
+                    name: flink-objectstore
+              resources:
+                requests:
+                  cpu: 1
+                  memory: ${JOBMANAGER_MEMORY}Gi
+                limits:
+                  cpu: 2
+                  memory: ${JOBMANAGER_MEMORY}Gi
+              securityContext:
+                runAsNonRoot: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: flink-config
+                  mountPath: /opt/flink/conf/config.yaml
+                  subPath: config.yaml
+                - name: kafka-files
+                  mountPath: /opt/flink/secrets/kafka
+                  readOnly: true
+                - name: jobmanager-data
+                  mountPath: /var/lib/flink
+          volumes:
+            - name: flink-config
+              configMap:
+                name: flink-config
+            - name: kafka-files
+              secret:
+                secretName: flink-kafka-files
+      volumeClaimTemplates:
+        - metadata:
+            name: jobmanager-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: ${JOBMANAGER_STORAGE}Gi
+
+  # ============================================================================
+  # TaskManager: StatefulSet
+  # ============================================================================
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: flink-taskmanager
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: taskmanager
+    spec:
+      clusterIP: None
+      publishNotReadyAddresses: true
+      selector:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: taskmanager
+      ports:
+        - name: data
+          port: 6125
+
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: flink-taskmanager
+      namespace: ${OPENSHIFT_NAMESPACE}
+      labels:
+        app.kubernetes.io/name: flink
+        app.kubernetes.io/component: taskmanager
+    spec:
+      serviceName: flink-taskmanager
+      replicas: ${TASKMANAGER_REPLICAS}
+      podManagementPolicy: Parallel
+      selector:
+        matchLabels:
+          app.kubernetes.io/name: flink
+          app.kubernetes.io/component: taskmanager
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: flink
+            app.kubernetes.io/component: taskmanager
+        spec:
+          serviceAccountName: flink-runner
+          terminationGracePeriodSeconds: 60
+          containers:
+            - name: taskmanager
+              image: ${SQL_RUNTIME_IMAGE_REF}
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: POD_IP
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: status.podIP
+                - name: POD_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+              envFrom:
+                - secretRef:
+                    name: flink-objectstore
+              command:
+                - /bin/bash
+                - -lc
+                - >-
+                  exec /opt/flink/bin/taskmanager.sh start-foreground
+                  -Dtaskmanager.host=${POD_IP}
+                  -Dtaskmanager.resource-id=${POD_NAME}
+              resources:
+                requests:
+                  cpu: 2
+                  memory: ${TASKMANAGER_MEMORY}Gi
+                limits:
+                  cpu: 4
+                  memory: ${TASKMANAGER_MEMORY}Gi
+              securityContext:
+                runAsNonRoot: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                seccompProfile:
+                  type: RuntimeDefault
+              volumeMounts:
+                - name: flink-config
+                  mountPath: /opt/flink/conf/config.yaml
+                  subPath: config.yaml
+                - name: kafka-files
+                  mountPath: /opt/flink/secrets/kafka
+                  readOnly: true
+                - name: taskmanager-data
+                  mountPath: /var/lib/flink
+          volumes:
+            - name: flink-config
+              configMap:
+                name: flink-config
+            - name: kafka-files
+              secret:
+                secretName: flink-kafka-files
+      volumeClaimTemplates:
+        - metadata:
+            name: taskmanager-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: ${TASKMANAGER_STORAGE}Gi

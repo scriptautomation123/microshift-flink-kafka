@@ -1,6 +1,7 @@
 # Kafka HA on Kubernetes (AI-Optimized Reference)
 
 ## Document Metadata
+
 - title: Designing and Testing a Highly Available Kafka Cluster on Kubernetes
 - source_type: article notes export
 - source_date: 2022-04
@@ -10,6 +11,7 @@
 - parsing_profile: structured_markdown_v1
 
 ## Executive Summary
+
 This document describes how to design and validate a Kafka cluster on Kubernetes for high availability.
 
 Core design choices:
@@ -31,6 +33,7 @@ Outcome:
 ## Canonical Concepts
 
 ### Kafka Replication Concepts
+
 - Topic: logical stream of records.
 - Partition: ordered shard of topic data.
 - Leader: replica serving reads/writes for a partition.
@@ -38,6 +41,7 @@ Outcome:
 - ISR (in-sync replicas): replicas caught up enough to be eligible for leader election.
 
 ### Kubernetes Concepts Used
+
 - StatefulSet: stable pod identity and storage mapping.
 - Headless Service (clusterIP: None): DNS returns individual pod endpoints.
 - PersistentVolumeClaim/PersistentVolume: per-broker durable storage.
@@ -45,6 +49,7 @@ Outcome:
 - PodDisruptionBudget: limit voluntary disruptions.
 
 ## Key Design Requirements
+
 1. Keep min.insync.replicas at 2.
 2. Keep topic replication factor at 3.
 3. Run at least 3 brokers.
@@ -54,6 +59,7 @@ Outcome:
 ## Reference Kubernetes Manifest Pattern
 
 ### Headless Service
+
 Purpose:
 - Provide stable DNS for each StatefulSet pod.
 
@@ -64,6 +70,7 @@ Core settings:
 - selector: app=kafka-app
 
 ### StatefulSet
+
 Purpose:
 - Run 3 brokers with stable names and per-pod persistent storage.
 
@@ -90,6 +97,7 @@ Storage:
 - mountPath: /mnt/kafka
 
 ## DNS and Addressability Model
+
 With StatefulSet + headless service, each broker has a predictable FQDN:
 
 - kafka-0.kafka-svc.default.svc.cluster.local
@@ -101,12 +109,14 @@ This enables deterministic broker discovery and stable identity in scripts and c
 ## Validation Workflow
 
 ### 1) Deploy Cluster
+
 Expected result:
 - Service created
 - StatefulSet ready with 3/3 brokers
 - One PVC per broker
 
 ### 2) Produce and Consume Test Message
+
 Test topic: test
 
 Producer behavior:
@@ -119,6 +129,7 @@ Expected output example:
 - hello world
 
 ### 3) Inspect Topic State
+
 Use topic describe and verify:
 - PartitionCount=1
 - ReplicationFactor=3
@@ -129,6 +140,7 @@ Use topic describe and verify:
 ## Failure and Recovery Scenarios
 
 ### Scenario A: Planned maintenance on leader node (single-node drain)
+
 Action:
 - Drain node hosting leader broker.
 
@@ -143,6 +155,7 @@ Why Pending can happen:
 - Broker cannot mount its volume on another node.
 
 ### Scenario B: Node returns after maintenance
+
 Action:
 - Uncordon drained node.
 
@@ -152,6 +165,7 @@ Observed behavior:
 - Cluster returns to full strength (ISR includes all brokers).
 
 ### Scenario C: Two nodes drained (voluntary disruption beyond quorum)
+
 Action:
 - Drain second node while first broker already unavailable.
 
@@ -161,6 +175,7 @@ Observed behavior:
 - Cluster effectively unavailable for quorum-protected writes.
 
 ### Scenario D: Protect against unsafe voluntary evictions
+
 Mitigation:
 - Add PodDisruptionBudget with minAvailable: 2 for kafka pods.
 
@@ -169,6 +184,7 @@ Observed behavior:
 - Node may still be cordoned, but protected pod eviction is denied.
 
 ### Scenario E: Permanent node loss (unplanned)
+
 Action:
 - Delete dead node object.
 
@@ -185,6 +201,7 @@ Recovery path:
 5. Wait for replica sync and ISR convergence.
 
 ## PodDisruptionBudget Reference
+
 Intent:
 - Preserve quorum during voluntary disruptions.
 
@@ -195,6 +212,7 @@ Minimal policy shape:
 - selector: app=kafka-app
 
 ## Operational Invariants
+
 - Do not run production RF=3 topics on fewer than 3 healthy broker identities for long periods.
 - Keep ISR count at or above min.insync.replicas for write availability with acks=all.
 - Expect leader re-election on broker failure.
@@ -204,6 +222,7 @@ Minimal policy shape:
 ## Practical Command Catalog
 
 ### Cluster and Resource Inspection
+
 - kubectl get nodes
 - kubectl get pods -l app=kafka-app
 - kubectl describe service kafka-svc
@@ -211,15 +230,18 @@ Minimal policy shape:
 - kubectl describe pod kafka-1
 
 ### Topic and Broker Inspection (from client pod)
+
 - kafka-topics.sh --describe --topic test --bootstrap-server <brokers>
 - kafka-console-producer.sh --topic test --request-required-acks all --bootstrap-server <brokers>
 - kafka-console-consumer.sh --topic test --from-beginning --bootstrap-server <brokers>
 
 ### Maintenance Operations
+
 - kubectl drain <node> --delete-emptydir-data --force --ignore-daemonsets
 - kubectl uncordon <node>
 
 ### Failure Recovery Operations
+
 - kubectl delete node <dead-node>
 - kubectl delete pvc data-kafka-<ordinal>
 - kubectl delete pod kafka-<ordinal>
@@ -235,6 +257,7 @@ Minimal policy shape:
 | Permanent node loss with local PV | Partial capacity | Usually works if ISR>=2 | Usually works | Replace node/broker and resync |
 
 ## Known Constraints and Caveats
+
 - This walkthrough uses Kafka KRaft mode for simplicity.
 - Original source notes claim KRaft limitations at that time (2022 context).
 - Production readiness and feature completeness should be validated against current Kafka version and vendor guidance.
@@ -243,6 +266,7 @@ Minimal policy shape:
 ## AI Extraction Blocks
 
 ### Structured Facts (YAML)
+
 ```yaml
 cluster:
   brokers: 3
@@ -268,6 +292,7 @@ failure_tolerance:
 ```
 
 ### Runbook Checklist
+
 - Confirm 3 brokers running.
 - Confirm topic RF=3 and min.insync.replicas=2.
 - Confirm ISR includes all brokers during steady state.
@@ -277,6 +302,7 @@ failure_tolerance:
 - If permanent node loss, replace node and rebuild missing broker identity/storage.
 
 ## Suggested Tags
+
 - kafka
 - kubernetes
 - statefulset

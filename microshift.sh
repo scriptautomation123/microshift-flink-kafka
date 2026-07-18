@@ -189,6 +189,8 @@ Options:
   --kafka-only                     Provision only Kafka PVs
   --flink-only                     Provision only Flink PVs
   --delete                         Delete the generated PVs instead of applying
+  --delete-pvcs                    Delete PVCs in the target namespaces
+  --check                          Report PV/PVC status and exit
   -h, --help                       Show this help
 
 Notes:
@@ -196,8 +198,10 @@ Notes:
   Use this on local single-node MINC/MicroShift clusters when no dynamic
   StorageClass is available.
 
-Example:
+Examples:
   microshift.sh provision-pv --kafka-namespace kafka-dev --flink-namespace flink-dev
+  microshift.sh provision-pv --check
+  microshift.sh provision-pv --delete --delete-pvcs
 EOF
 }
 
@@ -241,6 +245,36 @@ apply_or_delete() {
   fi
 }
 
+check_pv_status() {
+  log "PV status"
+  oc get pv -o wide || true
+
+  log "PVC status"
+  local namespaces=("$@")
+  local ns
+  for ns in "${namespaces[@]}"; do
+    if oc get namespace "${ns}" >/dev/null 2>&1; then
+      echo "--- namespace: ${ns} ---"
+      oc get pvc -n "${ns}" -o wide || true
+    else
+      echo "--- namespace: ${ns} (does not exist) ---"
+    fi
+  done
+}
+
+delete_pvcs_in_namespaces() {
+  local namespaces=("$@")
+  local ns
+  for ns in "${namespaces[@]}"; do
+    if oc get namespace "${ns}" >/dev/null 2>&1; then
+      log "deleting PVCs in namespace ${ns}"
+      oc delete pvc --all -n "${ns}" --ignore-not-found || true
+    else
+      log "namespace ${ns} does not exist; skipping PVC deletion"
+    fi
+  done
+}
+
 cmd_provision_pv() {
   local kafka_namespace="kafka-dev"
   local kafka_replicas=3
@@ -253,6 +287,8 @@ cmd_provision_pv() {
   local provision_kafka=true
   local provision_flink=true
   local delete_mode=false
+  local delete_pvcs=false
+  local check_mode=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -302,6 +338,14 @@ cmd_provision_pv() {
         delete_mode=true
         shift
         ;;
+      --delete-pvcs)
+        delete_pvcs=true
+        shift
+        ;;
+      --check)
+        check_mode=true
+        shift
+        ;;
       -h|--help)
         show_provision_pv_help
         exit 0
@@ -314,8 +358,17 @@ cmd_provision_pv() {
 
   require_cmd oc
 
+  if [[ "${check_mode}" == true ]]; then
+    check_pv_status "${kafka_namespace}" "${flink_namespace}"
+    return 0
+  fi
+
   if ! [[ "$kafka_replicas" =~ ^[0-9]+$ ]] || ! [[ "$flink_taskmanagers" =~ ^[0-9]+$ ]]; then
     die "replica counts must be integers"
+  fi
+
+  if [[ "${delete_pvcs}" == true ]]; then
+    delete_pvcs_in_namespaces "${kafka_namespace}" "${flink_namespace}"
   fi
 
   if [[ "${provision_kafka}" == true ]]; then
@@ -501,6 +554,395 @@ cmd_test_all() {
 }
 
 # ============================================================================
+# Flow / Workflow Commands
+# ============================================================================
+
+docker_is_active() {
+  systemctl is-active --quiet docker 2>/dev/null
+}
+
+show_install_fresh_help() {
+  cat <<'EOF'
+Usage: microshift.sh install-fresh [options]
+
+One-command fresh install of the MicroShift cluster on the local host.
+This runs the same steps documented in podman_minc_README.md manually.
+
+Options:
+  --dns1 <ip>                      Primary DNS server (default: 1.1.1.1)
+  --dns2 <ip>                      Secondary DNS server (default: 8.8.8.8)
+  --skip-dns                       Skip Podman DNS configuration
+  --skip-forwarding                Skip Docker-to-Podman forwarding install
+  --skip-pv                        Skip local static PV provisioning
+  --kafka-namespace <name>         Kafka namespace for PVs (default: kafka-dev)
+  --flink-namespace <name>         Flink namespace for PVs (default: flink-dev)
+  -h, --help                       Show this help
+
+This command requires sudo for the DNS/forwarding host steps.
+
+Example:
+  sudo microshift.sh install-fresh
+EOF
+}
+
+cmd_install_fresh() {
+  local dns1="1.1.1.1"
+  local dns2="8.8.8.8"
+  local skip_dns=false
+  local skip_forwarding=false
+  local skip_pv=false
+  local kafka_namespace="kafka-dev"
+  local flink_namespace="flink-dev"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dns1)
+        dns1="${2:-}"
+        shift 2
+        ;;
+      --dns2)
+        dns2="${2:-}"
+        shift 2
+        ;;
+      --skip-dns)
+        skip_dns=true
+        shift
+        ;;
+      --skip-forwarding)
+        skip_forwarding=true
+        shift
+        ;;
+      --skip-pv)
+        skip_pv=true
+        shift
+        ;;
+      --kafka-namespace)
+        kafka_namespace="${2:-}"
+        shift 2
+        ;;
+      --flink-namespace)
+        flink_namespace="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        show_install_fresh_help
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  require_cmd minc
+  require_cmd oc
+
+  if [[ "${skip_dns}" != true ]]; then
+    log "running host DNS configuration"
+    cmd_configure_dns --dns1 "${dns1}" --dns2 "${dns2}"
+  fi
+
+  if [[ "${skip_forwarding}" != true ]] && docker_is_active; then
+    log "Docker detected active; installing podman forwarding service"
+    cmd_install_forwarding
+  fi
+
+  log "creating MINC cluster"
+  minc delete || true
+  minc create
+
+  log "generating kubeconfig"
+  minc generate-kubeconfig
+  oc config use-context microshift
+
+  export PATH="$HOME/.local/bin:$PATH"
+
+  log "validating cluster access"
+  oc whoami
+  oc get nodes -o wide
+
+  if [[ "${skip_pv}" != true ]]; then
+    log "provisioning local static PVs"
+    cmd_provision_pv --kafka-namespace "${kafka_namespace}" --flink-namespace "${flink_namespace}"
+  fi
+
+  log "fresh install completed"
+}
+
+show_reinstall_fresh_help() {
+  cat <<'EOF'
+Usage: microshift.sh reinstall-fresh [options]
+
+Tear down the existing cluster, delete PVCs and PVs, optionally wipe local
+host data, then run a fresh install.
+
+Options:
+  --wipe-local-data                Also remove /var/lib/microshift-local-pv and ~/.kube
+  --dns1 <ip>                      Primary DNS server (default: 1.1.1.1)
+  --dns2 <ip>                      Secondary DNS server (default: 8.8.8.8)
+  --skip-dns                       Skip Podman DNS configuration
+  --skip-forwarding                Skip Docker-to-Podman forwarding install
+  --skip-pv                        Skip local static PV provisioning
+  --kafka-namespace <name>         Kafka namespace for PVs (default: kafka-dev)
+  --flink-namespace <name>         Flink namespace for PVs (default: flink-dev)
+  -h, --help                       Show this help
+
+Example:
+  sudo microshift.sh reinstall-fresh --wipe-local-data
+EOF
+}
+
+cmd_reinstall_fresh() {
+  local wipe_local_data=false
+  local install_args=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --wipe-local-data)
+        wipe_local_data=true
+        shift
+        ;;
+      -h|--help)
+        show_reinstall_fresh_help
+        exit 0
+        ;;
+      *)
+        install_args+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  log "starting full reinstall"
+  cmd_delete_all --delete-pvcs --delete-pvs "${install_args[@]}"
+
+  if [[ "${wipe_local_data}" == true ]]; then
+    log "wiping local host data"
+    sudo rm -rf /var/lib/microshift-local-pv
+    rm -rf "$HOME/.kube"
+  fi
+
+  cmd_install_fresh "${install_args[@]}"
+}
+
+show_delete_all_help() {
+  cat <<'EOF'
+Usage: microshift.sh delete-all [options]
+
+Delete the MINC cluster, PVCs, and static PVs.
+
+Options:
+  --keep-cluster                   Delete PVCs/PVs but keep the MINC cluster running
+  --delete-pvcs                    Delete PVCs in target namespaces
+  --delete-pvs                     Delete generated static PVs
+  --wipe-local-data                Remove /var/lib/microshift-local-pv host data
+  --kafka-namespace <name>         Kafka namespace (default: kafka-dev)
+  --flink-namespace <name>         Flink namespace (default: flink-dev)
+  -h, --help                       Show this help
+
+Example:
+  microshift.sh delete-all --delete-pvcs --delete-pvs
+  sudo microshift.sh delete-all --delete-pvcs --delete-pvs --wipe-local-data
+EOF
+}
+
+cmd_delete_all() {
+  local keep_cluster=false
+  local delete_pvcs=false
+  local delete_pvs=false
+  local wipe_local_data=false
+  local kafka_namespace="kafka-dev"
+  local flink_namespace="flink-dev"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keep-cluster)
+        keep_cluster=true
+        shift
+        ;;
+      --delete-pvcs)
+        delete_pvcs=true
+        shift
+        ;;
+      --delete-pvs)
+        delete_pvs=true
+        shift
+        ;;
+      --wipe-local-data)
+        wipe_local_data=true
+        shift
+        ;;
+      --kafka-namespace)
+        kafka_namespace="${2:-}"
+        shift 2
+        ;;
+      --flink-namespace)
+        flink_namespace="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        show_delete_all_help
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  if [[ "${delete_pvcs}" == true ]]; then
+    delete_pvcs_in_namespaces "${kafka_namespace}" "${flink_namespace}"
+  fi
+
+  if [[ "${delete_pvs}" == true ]]; then
+    cmd_provision_pv --delete --kafka-namespace "${kafka_namespace}" --flink-namespace "${flink_namespace}"
+  fi
+
+  if [[ "${keep_cluster}" != true ]]; then
+    log "deleting MINC cluster"
+    minc delete || true
+  fi
+
+  if [[ "${wipe_local_data}" == true ]]; then
+    log "wiping local host data"
+    sudo rm -rf /var/lib/microshift-local-pv
+    rm -rf "$HOME/.kube"
+  fi
+
+  log "delete-all completed"
+}
+
+show_resume_help() {
+  cat <<'EOF'
+Usage: microshift.sh resume [options]
+
+Regenerate kubeconfig, switch to the microshift context, and validate access.
+Use this after host reboot or when oc commands stop working.
+
+Options:
+  --check-pv                       Also run PV/PVC status check
+  --kafka-namespace <name>         Kafka namespace for PV check (default: kafka-dev)
+  --flink-namespace <name>         Flink namespace for PV check (default: flink-dev)
+  -h, --help                       Show this help
+
+Example:
+  microshift.sh resume --check-pv
+EOF
+}
+
+cmd_resume() {
+  local check_pv=false
+  local kafka_namespace="kafka-dev"
+  local flink_namespace="flink-dev"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --check-pv)
+        check_pv=true
+        shift
+        ;;
+      --kafka-namespace)
+        kafka_namespace="${2:-}"
+        shift 2
+        ;;
+      --flink-namespace)
+        flink_namespace="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        show_resume_help
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  require_cmd minc
+  require_cmd oc
+
+  log "resuming cluster access"
+  minc status
+  minc list
+  minc generate-kubeconfig
+  oc config use-context microshift
+
+  export PATH="$HOME/.local/bin:$PATH"
+
+  log "validating access"
+  oc whoami
+  oc get nodes -o wide
+
+  if [[ "${check_pv}" == true ]]; then
+    cmd_provision_pv --check --kafka-namespace "${kafka_namespace}" --flink-namespace "${flink_namespace}"
+  fi
+
+  log "resume completed"
+}
+
+show_status_help() {
+  cat <<'EOF'
+Usage: microshift.sh status [options]
+
+Show the full status of the MINC cluster, OpenShift access, and storage.
+
+Options:
+  --kafka-namespace <name>         Kafka namespace for PV check (default: kafka-dev)
+  --flink-namespace <name>         Flink namespace for PV check (default: flink-dev)
+  -h, --help                       Show this help
+
+Example:
+  microshift.sh status
+EOF
+}
+
+cmd_status() {
+  local kafka_namespace="kafka-dev"
+  local flink_namespace="flink-dev"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --kafka-namespace)
+        kafka_namespace="${2:-}"
+        shift 2
+        ;;
+      --flink-namespace)
+        flink_namespace="${2:-}"
+        shift 2
+        ;;
+      -h|--help)
+        show_status_help
+        exit 0
+        ;;
+      *)
+        die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  require_cmd minc
+
+  log "MINC status"
+  minc status || true
+  minc list || true
+
+  if command -v oc >/dev/null 2>&1; then
+    log "OpenShift context"
+    oc config current-context 2>/dev/null || true
+    oc whoami 2>/dev/null || true
+    oc get nodes -o wide 2>/dev/null || true
+  else
+    log "oc not found in PATH"
+  fi
+
+  if command -v oc >/dev/null 2>&1; then
+    log "storage status"
+    cmd_provision_pv --check --kafka-namespace "${kafka_namespace}" --flink-namespace "${flink_namespace}"
+  fi
+}
+
+# ============================================================================
 # Main Help & Dispatcher
 # ============================================================================
 
@@ -514,16 +956,34 @@ show_main_help() {
 Usage: microshift.sh <command> [options]
 
 Commands:
+  install-fresh          Fresh cluster install (DNS, forwarding, MINC, PVs)
+  reinstall-fresh        Delete everything and run install-fresh
+  delete-all             Delete cluster, PVCs, PVs, and optional local data
+  resume                 Regenerate kubeconfig and validate cluster access
+  status                 Show cluster, access, and storage status
   test-all               Run comprehensive cluster validation tests
   configure-dns          Configure Podman DNS settings (requires sudo)
   install-forwarding     Install Docker-to-Podman forwarding service (requires sudo)
-  provision-pv           Provision local static PersistentVolumes
+  provision-pv           Provision/check/delete local static PersistentVolumes and PVCs
   -h, --help             Show this help message
 
-Examples:
-  # Run full cluster test
-  microshift.sh test-all --clean
+Workflow Examples:
+  # First-time install
+  sudo microshift.sh install-fresh
 
+  # Continue working after a reboot
+  microshift.sh resume --check-pv
+
+  # Check everything
+  microshift.sh status
+
+  # Delete workloads and cluster, keep host data
+  microshift.sh delete-all --delete-pvcs --delete-pvs
+
+  # Full wipe and reinstall
+  sudo microshift.sh reinstall-fresh --wipe-local-data
+
+Component Examples:
   # Configure DNS with custom servers
   sudo microshift.sh configure-dns --dns1 1.1.1.1 --dns2 8.8.8.8
 
@@ -532,7 +992,12 @@ Examples:
 
   # Provision local PVs for Kafka and Flink
   microshift.sh provision-pv --kafka-namespace kafka-dev --flink-namespace flink-dev
-scripts/env scripts/flink-docker scripts/flink-sql scripts/kafka-docker scripts/manifests scripts/lib.sh scripts/microshift.sh
+
+  # Check PV/PVC status
+  microshift.sh provision-pv --check
+
+  # Delete PVs and PVCs for a fresh start
+  microshift.sh provision-pv --delete --delete-pvcs
 
 For detailed command help:
   microshift.sh <command> --help
@@ -547,6 +1012,26 @@ main() {
   local cmd="${1:-}"
 
   case "${cmd}" in
+    install-fresh)
+      shift
+      cmd_install_fresh "$@"
+      ;;
+    reinstall-fresh)
+      shift
+      cmd_reinstall_fresh "$@"
+      ;;
+    delete-all)
+      shift
+      cmd_delete_all "$@"
+      ;;
+    resume)
+      shift
+      cmd_resume "$@"
+      ;;
+    status)
+      shift
+      cmd_status "$@"
+      ;;
     test-all)
       shift
       cmd_test_all "$@"
