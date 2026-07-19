@@ -1,5 +1,12 @@
 ARG BASE_RUNTIME_IMAGE=ghcr.io/owner/flink-sql-runtime:2.3.0
-FROM ${BASE_RUNTIME_IMAGE}
+FROM ghcr.io/owner/flink-sql-runtime:2.3.0
+
+RUN addgroup --system app && adduser --system --ingroup app appuser
 
 ARG APP_JAR=target/my-app.jar
-COPY ${APP_JAR} /opt/flink/usrlib/application.jar
+COPY --chown=appuser:app ${APP_JAR} /opt/flink/usrlib/application.jar
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+	CMD test -f /opt/flink/usrlib/application.jar || exit 1
